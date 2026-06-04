@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>AXIOM SHADOW RAYCAST // WEB DEMO</title>
+    <style>
+        body { margin: 0; background-color: #010103; color: #ffff00; font-family: monospace; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+        #container { position: relative; border: 2px solid #ffff00; box-shadow: 0 0 15px rgba(255, 255, 0, 0.2); }
+        canvas { display: block; cursor: none; }
+        .hud { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.85); border: 1px solid #ff00ff; padding: 10px; font-size: 12px; pointer-events: none; }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div class="hud">
+            FPS: 60 (WEB OPTIMIZED)<br>
+            RENDER: 360° RAYCAST SHADOWS<br>
+            <span style="color: #00ffff;">MOVE MOUSE TO CORE LIGHT</span>
+        </div>
+        <canvas id="canvas"></canvas>
+    </div>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 800; canvas.height = 600;
+
+        // Obstáculos geométricos fijos (Cajas de piedra)
+        const walls = [
+            { x: 150, y: 150, w: 100, h: 100 },
+            { x: 500, y: 100, w: 120, h: 80 },
+            { x: 250, y: 400, w: 80, h: 150 },
+            { x: 600, y: 350, w: 100, h: 100 }
+        ];
+
+        // Posición inicial de la linterna
+        let mouse = { x: canvas.width / 2, y: canvas.height / 2 };
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            mouse.x = e.clientX - rect.left;
+            mouse.y = e.clientY - rect.top;
+        });
+
+        function loop() {
+            // Fondo oscuro impenetrable
+            ctx.fillStyle = '#010102'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 🔥 MOTOR DE RAYCASTING (Lanzamos 360 rayos de luz individuales)
+            const numRays = 360;
+            for (let i = 0; i < numRays; i++) {
+                let angle = (i * (360 / numRays)) * Math.PI / 180;
+                let rayDirX = Math.cos(angle);
+                let rayDirY = Math.sin(angle);
+                let maxDist = 1200; // Alcance máximo de los fotones
+
+                // Comprobamos la intersección del rayo con los 4 muros
+                walls.forEach(wall => {
+                    let t1 = (wall.x - mouse.x) / rayDirX;
+                    let t2 = (wall.x + wall.w - mouse.x) / rayDirX;
+                    let t3 = (wall.y - mouse.y) / rayDirY;
+                    let t4 = (wall.y + wall.h - mouse.y) / rayDirY;
+
+                    let tmin = Math.max(Math.min(t1, t2), Math.min(t3, t4));
+                    let tmax = Math.min(Math.max(t1, t2), Math.max(t3, t4));
+
+                    if (tmax >= tmin && tmin > 0 && tmin < maxDist) {
+                        maxDist = tmin; // Si choca con un muro, el haz se corta ahí (Sombras)
+                    }
+                });
+
+                let endX = mouse.x + rayDirX * maxDist;
+                let endY = mouse.y + rayDirY * maxDist;
+
+                // Dibujamos el hilo de luz desvaneciéndose por la distancia
+                let alpha = Math.pow(1.0 - (maxDist / 1200), 2.0) * 0.15;
+                ctx.strokeStyle = `rgba(255, 230, 100, ${alpha})`;
+                ctx.lineWidth = 1.5;
+                ctx.beginPath(); ctx.moveTo(mouse.x, mouse.y); ctx.lineTo(endX, endY); ctx.stroke();
+            }
+
+            // Dibujamos los bloques de piedra con bordes cian neón Axiom
+            walls.forEach(wall => {
+                ctx.fillStyle = '#0c0c12'; ctx.fillRect(wall.x, wall.y, wall.w, wall.h);
+                ctx.strokeStyle = '#00ffff'; ctx.lineWidth = 2; ctx.strokeRect(wall.x, wall.y, wall.w, wall.h);
+            });
+
+            // El núcleo brillante de la luz
+            ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(mouse.x, mouse.y, 5, 0, Math.PI*2); ctx.fill();
+            ctx.strokeStyle = '#ffff00'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(mouse.x, mouse.y, 10, 0, Math.PI*2); ctx.stroke();
+
+            requestAnimationFrame(loop);
+        }
+        loop();
+    </script>
+</body>
+</html>
