@@ -2,91 +2,110 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>AXIOM SHADOW RAYCAST // WEB DEMO</title>
+    <title>AXIOM SHADOW RAYCAST // COVERT LIGHT</title>
     <style>
-        body { margin: 0; background-color: #010103; color: #ffff00; font-family: monospace; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
-        #container { position: relative; border: 2px solid #ffff00; box-shadow: 0 0 15px rgba(255, 255, 0, 0.2); }
-        canvas { display: block; cursor: none; }
-        .hud { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.85); border: 1px solid #ff00ff; padding: 10px; font-size: 12px; pointer-events: none; }
+        body { margin: 0; background-color: #010103; color: #ffff00; font-family: monospace; overflow: hidden; display: flex; align-items: center; justify-content: center; height: 100vh; user-select: none; }
+        #container { position: relative; border: 2px solid #ffff00; }
+        canvas { display: block; }
+        .hud { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.85); border: 1px solid #ff00ff; padding: 12px; font-size: 13px; pointer-events: none; }
     </style>
 </head>
 <body>
     <div id="container">
         <div class="hud">
-            FPS: 60 (WEB OPTIMIZED)<br>
-            RENDER: 360° RAYCAST SHADOWS<br>
-            <span style="color: #00ffff;">MOVE MOUSE TO CORE LIGHT</span>
+            <span style="color:#00ffff; font-weight:bold;">OBJETIVO: ILUMINA Y EVAPORA LOS NÚCLEOS MORADOS</span><br>
+            NÚCLEOS DESTRUIDOS: <span id="score">0</span><br>
+            POTENCIA DE FOTONES: <span id="mode">ESTÁNDAR (250m)</span>
         </div>
         <canvas id="canvas"></canvas>
     </div>
     <script>
-        const canvas = document.getElementById('canvas');
-        const ctx = canvas.getContext('2d');
+        const canvas = document.getElementById('canvas'); const ctx = canvas.getContext('2d');
         canvas.width = 800; canvas.height = 600;
 
-        // Obstáculos geométricos fijos (Cajas de piedra)
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playZapSound() {
+            let osc = audioCtx.createOscillator(); let gain = audioCtx.createGain();
+            osc.connect(gain); gain.connect(audioCtx.destination);
+            osc.type = 'sawtooth'; osc.frequency.setValueAtTime(400, audioCtx.currentTime);
+            osc.frequency.linearRampToValueAtTime(900, audioCtx.currentTime + 0.05);
+            gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+            gain.gain.linearRampToValueAtTime(0.001, audioCtx.currentTime + 0.05);
+            osc.start(); osc.stop(audioCtx.currentTime + 0.05);
+        }
+
         const walls = [
-            { x: 150, y: 150, w: 100, h: 100 },
-            { x: 500, y: 100, w: 120, h: 80 },
-            { x: 250, y: 400, w: 80, h: 150 },
-            { x: 600, y: 350, w: 100, h: 100 }
+            { x: 120, y: 120, w: 100, h: 100 }, { x: 520, y: 100, w: 120, h: 80 },
+            { x: 220, y: 380, w: 90, h: 130 }, { x: 580, y: 380, w: 100, h: 100 }
         ];
 
-        // Posición inicial de la linterna
+        let score = 0, maxLightDist = 220;
+        let target = { x: 380, y: 220, life: 100 };
+
         let mouse = { x: canvas.width / 2, y: canvas.height / 2 };
-        canvas.addEventListener('mousemove', (e) => {
-            const rect = canvas.getBoundingClientRect();
-            mouse.x = e.clientX - rect.left;
-            mouse.y = e.clientY - rect.top;
-        });
+        function updateLight(ex, ey) {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            mouse.x = ex; mouse.y = ey;
+        }
+        canvas.addEventListener('mousemove', (e) => { const r = canvas.getBoundingClientRect(); updateLight(e.clientX - r.left, e.clientY - r.top); });
+        canvas.addEventListener('touchmove', (e) => { const r = canvas.getBoundingClientRect(); const t = e.touches[0]; updateLight(t.clientX - r.left, t.clientY - r.top); e.preventDefault(); }, {passive: false});
 
         function loop() {
-            // Fondo oscuro impenetrable
             ctx.fillStyle = '#010102'; ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            // 🔥 MOTOR DE RAYCASTING (Lanzamos 360 rayos de luz individuales)
-            const numRays = 360;
-            for (let i = 0; i < numRays; i++) {
-                let angle = (i * (360 / numRays)) * Math.PI / 180;
-                let rayDirX = Math.cos(angle);
-                let rayDirY = Math.sin(angle);
-                let maxDist = 1200; // Alcance máximo de los fotones
-
-                // Comprobamos la intersección del rayo con los 4 muros
-                walls.forEach(wall => {
-                    let t1 = (wall.x - mouse.x) / rayDirX;
-                    let t2 = (wall.x + wall.w - mouse.x) / rayDirX;
-                    let t3 = (wall.y - mouse.y) / rayDirY;
-                    let t4 = (wall.y + wall.h - mouse.y) / rayDirY;
-
-                    let tmin = Math.max(Math.min(t1, t2), Math.min(t3, t4));
-                    let tmax = Math.min(Math.max(t1, t2), Math.max(t3, t4));
-
-                    if (tmax >= tmin && tmin > 0 && tmin < maxDist) {
-                        maxDist = tmin; // Si choca con un muro, el haz se corta ahí (Sombras)
+            // Lógica de evaporación del objetivo oculto
+            let tdx = target.x - mouse.x, tdy = target.y - mouse.y;
+            let distToTarget = Math.sqrt(tdx*tdx + tdy*tdy);
+            
+            // ¿Está en el radio de luz?
+            if(distToTarget < maxLightDist) {
+                target.life -= 1.5;
+                if(Math.random() < 0.3) playZapSound();
+                if(target.life <= 0) {
+                    score++; document.getElementById('score').innerText = score;
+                    target.x = Math.random() * (canvas.width - 150) + 75;
+                    target.y = Math.random() * (canvas.height - 150) + 75;
+                    target.life = 100;
+                    // WOW MOMENT: A los 5 puntos, linterna mega destructiva
+                    if(score === 5) {
+                        maxLightDist = 800;
+                        document.getElementById('mode').innerText = "⚡ ¡MEGACARGADO HYPER-BEAM! (800m)";
                     }
-                });
-
-                let endX = mouse.x + rayDirX * maxDist;
-                let endY = mouse.y + rayDirY * maxDist;
-
-                // Dibujamos el hilo de luz desvaneciéndose por la distancia
-                let alpha = Math.pow(1.0 - (maxDist / 1200), 2.0) * 0.15;
-                ctx.strokeStyle = `rgba(255, 230, 100, ${alpha})`;
-                ctx.lineWidth = 1.5;
-                ctx.beginPath(); ctx.moveTo(mouse.x, mouse.y); ctx.lineTo(endX, endY); ctx.stroke();
+                }
             }
 
-            // Dibujamos los bloques de piedra con bordes cian neón Axiom
+            // Pintar objetivo oculto (Solo se nota si la luz pasa cerca o según su vida)
+            ctx.fillStyle = `rgba(255, 0, 255, ${target.life / 100})`;
+            ctx.beginPath(); ctx.arc(target.x, target.y, 14, 0, Math.PI*2); ctx.fill();
+
+            // Raycasting de Sombras 360°
+            const numRays = 180;
+            for (let i = 0; i < numRays; i++) {
+                let angle = (i * (360 / numRays)) * Math.PI / 180;
+                let rayDirX = Math.cos(angle); let rayDirY = Math.sin(angle);
+                let maxDist = maxLightDist;
+
+                walls.forEach(wall => {
+                    let t1 = (wall.x - mouse.x) / rayDirX; let t2 = (wall.x + wall.w - mouse.x) / rayDirX;
+                    let t3 = (wall.y - mouse.y) / rayDirY; let t4 = (wall.y + wall.h - mouse.y) / rayDirY;
+                    let tmin = Math.max(Math.min(t1, t2), Math.min(t3, t4));
+                    let tmax = Math.min(Math.max(t1, t2), Math.max(t3, t4));
+                    if (tmax >= tmin && tmin > 0 && tmin < maxDist) maxDist = tmin;
+                });
+
+                let endX = mouse.x + rayDirX * maxDist; let endY = mouse.y + rayDirY * maxDist;
+                let alpha = Math.pow(1.0 - (maxDist / maxLightDist), 2.0) * (score >= 5 ? 0.3 : 0.15);
+                ctx.strokeStyle = score >= 5 ? `rgba(0, 255, 255, ${alpha})` : `rgba(255, 230, 100, ${alpha})`;
+                ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(mouse.x, mouse.y); ctx.lineTo(endX, endY); ctx.stroke();
+            }
+
+            // Muros
             walls.forEach(wall => {
-                ctx.fillStyle = '#0c0c12'; ctx.fillRect(wall.x, wall.y, wall.w, wall.h);
-                ctx.strokeStyle = '#00ffff'; ctx.lineWidth = 2; ctx.strokeRect(wall.x, wall.y, wall.w, wall.h);
+                ctx.fillStyle = '#0a0a12'; ctx.fillRect(wall.x, wall.y, wall.w, wall.h);
+                ctx.strokeStyle = '#ff0055'; ctx.lineWidth = 1.5; ctx.strokeRect(wall.x, wall.y, wall.w, wall.h);
             });
 
-            // El núcleo brillante de la luz
-            ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(mouse.x, mouse.y, 5, 0, Math.PI*2); ctx.fill();
-            ctx.strokeStyle = '#ffff00'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(mouse.x, mouse.y, 10, 0, Math.PI*2); ctx.stroke();
-
+            ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(mouse.x, mouse.y, 4, 0, Math.PI*2); ctx.fill();
             requestAnimationFrame(loop);
         }
         loop();
